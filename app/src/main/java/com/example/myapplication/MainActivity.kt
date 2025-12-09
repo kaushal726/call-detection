@@ -6,7 +6,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.telecom.TelecomManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -34,20 +33,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val tm = getSystemService(TELECOM_SERVICE) as TelecomManager
 
-        if (tm.defaultDialerPackage != packageName) {
-            val intent = Intent(TelecomManager.ACTION_CHANGE_DEFAULT_DIALER)
-            intent.putExtra(
-                TelecomManager.EXTRA_CHANGE_DEFAULT_DIALER_PACKAGE_NAME,
-                packageName
-            )
-            startActivity(intent)
-        }
 
         // Start the foreground service
         startCallMonitorService()
-        requestScreeningRole()
 
         setContent {
             MaterialTheme {
@@ -61,19 +50,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun requestScreeningRole() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val roleManager = getSystemService(RoleManager::class.java)
-
-            if (!roleManager.isRoleHeld(RoleManager.ROLE_CALL_SCREENING)) {
-
-                val intent = roleManager.createRequestRoleIntent(
-                    RoleManager.ROLE_CALL_SCREENING
-                )
-                startActivity(intent)
-            }
-        }
-    }
 
     private fun startCallMonitorService() {
         val serviceIntent = Intent(this, CallMonitorService::class.java)
@@ -87,7 +63,6 @@ class MainActivity : ComponentActivity() {
     @Composable
     fun CallLoggerScreen() {
         var hasPermissions by remember { mutableStateOf(checkPermissions()) }
-        var hasRole by remember { mutableStateOf(checkCallScreeningRole()) }
 
         // Permission launcher
         val permissionLauncher = rememberLauncherForActivityResult(
@@ -99,30 +74,16 @@ class MainActivity : ComponentActivity() {
             if (allGranted) {
                 Toast.makeText(this, "Permissions granted!", Toast.LENGTH_SHORT).show()
                 // Request role after permissions
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !hasRole) {
-                    requestCallScreeningRole()
-                }
+
             } else {
                 Toast.makeText(this, "Permissions denied", Toast.LENGTH_SHORT).show()
             }
         }
 
-        // Role launcher
-        val roleLauncher = rememberLauncherForActivityResult(
-            ActivityResultContracts.StartActivityForResult()
-        ) { result ->
-            hasRole = checkCallScreeningRole()
-            if (result.resultCode == RESULT_OK) {
-                Toast.makeText(this, "Call screening enabled!", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(this, "Call screening denied", Toast.LENGTH_LONG).show()
-            }
-        }
 
         // Update status when screen appears
         LaunchedEffect(Unit) {
             hasPermissions = checkPermissions()
-            hasRole = checkCallScreeningRole()
         }
 
         val infiniteTransition = rememberInfiniteTransition()
@@ -166,7 +127,7 @@ class MainActivity : ComponentActivity() {
                     }
             )
 
-            if (hasPermissions && hasRole) {
+            if (hasPermissions ) {
                 Text(
                     text = "Ready to Use",
                     fontSize = 24.sp,
@@ -175,24 +136,16 @@ class MainActivity : ComponentActivity() {
             } else {
                 Button(
                     onClick = {
-                        if (!hasPermissions) {
-                            // Request permissions
-                            val permissions = mutableListOf(
-                                Manifest.permission.READ_PHONE_STATE,
-                                Manifest.permission.READ_CALL_LOG
-                            )
+                        val permissions = mutableListOf(
+                            Manifest.permission.READ_PHONE_STATE,
+                            Manifest.permission.READ_CALL_LOG
+                        )
 
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                permissions.add(Manifest.permission.POST_NOTIFICATIONS)
-                            }
-
-                            permissionLauncher.launch(permissions.toTypedArray())
-                        } else if (!hasRole && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            // Request call screening role
-                            val roleManager = getSystemService(RoleManager::class.java)
-                            val intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING)
-                            roleLauncher.launch(intent)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
                         }
+
+                        permissionLauncher.launch(permissions.toTypedArray())
                     }
                 ) {
                     Text(
