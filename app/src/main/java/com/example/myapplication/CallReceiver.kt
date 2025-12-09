@@ -19,7 +19,7 @@ class CallReceiver : BroadcastReceiver() {
 
     companion object {
         private const val PUB_ID = "283"
-        private const val API_URL = "https://develop-api.zillout.com/api/v1/rbzo/exotel"
+        private const val API_URL = "https://develop-api.zillout.com/api/v1/rbzo/exotel/read-from-app"
 
         private var lastState = TelephonyManager.CALL_STATE_IDLE
         private var incomingNumber: String? = null
@@ -167,53 +167,50 @@ class CallReceiver : BroadcastReceiver() {
         phoneNumber: String,
         callType: String,
         dialCallStatus: String,
-        durationSeconds: Int
+        durationSeconds: Int,
+
     ) {
 
         CoroutineScope(Dispatchers.IO).launch {
 
             try {
-                sendToWebhookTest(phoneNumber)
-                val baseUrl = "$API_URL/$PUB_ID/webhook"
-
+                val baseUrl = API_URL
                 val dateFormat = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss", Locale.ENGLISH)
                 val createdAt = dateFormat.format(Date())
-                val callSid = generateCallSid()
+                val callSid = "app_" + generateCallSid()
 
-                // Build query parameters
-                val params = mapOf(
-                    "CallSid" to callSid,
-                    "CallFrom" to phoneNumber,
-                    "CallType" to callType,
-                    "Created" to createdAt,
-                    "CallDuration" to durationSeconds.toString(),
-                    "DialCallStatus" to dialCallStatus,
-                    "Direction" to "incoming"
-                )
-
-                // Construct URL with query parameters
-                val queryString = params.entries.joinToString("&") { (key, value) ->
-                    "$key=${URLEncoder.encode(value, "UTF-8")}"
+                val jsonBody = JSONObject().apply {
+                    put("callSid", callSid)
+                    put("callFrom", phoneNumber)
+                    put("callType", callType)
+                    put("created", createdAt)
+                    put("dialCallDuration", durationSeconds)
+                    put("dialCallStatus", dialCallStatus)
+                    put("direction", "incoming")
+                    put("pubId", PUB_ID)
                 }
 
-                val fullUrl = "$baseUrl?$queryString"
+                Log.d("CallReceiver", "API BODY: $jsonBody")
 
-                Log.d("CallReceiver", "API URL: $fullUrl")
-
-                val url = URL(fullUrl)
+                val url = URL(baseUrl)
                 val connection = url.openConnection() as HttpURLConnection
 
-
-
-                connection.requestMethod = "GET"
+                connection.requestMethod = "POST"
+                connection.setRequestProperty("Content-Type", "application/json")
                 connection.connectTimeout = 10000
                 connection.readTimeout = 10000
+                connection.doOutput = true
+
+                // Send body
+                connection.outputStream.use { os ->
+                    os.write(jsonBody.toString().toByteArray(Charsets.UTF_8))
+                }
 
                 val responseCode = connection.responseCode
 
                 Log.d(
                     "CallReceiver",
-                    "API SENT -> $callType | $phoneNumber | ${durationSeconds}s | Response: $responseCode"
+                    "API SENT -> $callType | $phoneNumber | ${durationSeconds}s | PUB:$PUB_ID | Response: $responseCode"
                 )
 
                 connection.disconnect()
