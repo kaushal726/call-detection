@@ -1,0 +1,40 @@
+name: Build Venue APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      venue_id:
+        description: "Venue ID"
+        required: true
+        default: "1"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Grant Gradle permission
+        run: chmod +x ./gradlew
+
+      - name: Build APK with Venue ID
+        run: ./gradlew assembleRelease -PVENUE_ID=${{ github.event.inputs.venue_id }}
+
+      - name: Rename APK
+        run: |
+          cd app/build/outputs/apk/release
+          mv *.apk zillout-venue-${{ github.event.inputs.venue_id }}.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: zillout-venue-${{ github.event.inputs.venue_id }}
+          path: app/build/outputs/apk/release/zillout-venue-${{ github.event.inputs.venue_id }}.apk

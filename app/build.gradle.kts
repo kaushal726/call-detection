@@ -6,11 +6,8 @@ plugins {
 
 android {
     namespace = "com.example.myapplication"
-    compileSdk {
-        version = release(36)
-    }
 
-
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.myapplication"
@@ -18,6 +15,10 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+
+        // ✅ VENUE ID FROM CI / CLI
+        val venueId = project.findProperty("VENUE_ID")?.toString() ?: "0"
+        buildConfigField("int", "VENUE_ID", venueId)
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -31,15 +32,19 @@ android {
             )
         }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
     kotlinOptions {
         jvmTarget = "11"
     }
+
     buildFeatures {
         compose = true
+        buildConfig = true // ✅ REQUIRED
     }
 }
 
@@ -54,6 +59,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.appcompat)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

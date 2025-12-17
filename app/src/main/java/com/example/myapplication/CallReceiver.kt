@@ -14,12 +14,15 @@ import java.net.URL
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.*
+import com.example.myapplication.BuildConfig
+
 
 class CallReceiver : BroadcastReceiver() {
 
     companion object {
-        private const val PUB_ID = "283"
-        private const val API_URL = "https://develop-api.zillout.com/api/v1/rbzo/exotel/read-from-app"
+        private val PUB_ID =  BuildConfig.VENUE_ID
+
+        private const val API_URL = "https://api.zillout.com/api/v1/rbzo/exotel/read-from-app"
 
         private var lastState = TelephonyManager.CALL_STATE_IDLE
         private var incomingNumber: String? = null
