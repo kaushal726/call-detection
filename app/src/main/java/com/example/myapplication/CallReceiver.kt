@@ -18,13 +18,18 @@ import java.util.*
 class CallReceiver : BroadcastReceiver() {
 
     companion object {
-        private const val PUB_ID = "283"
+        private const val PUB_ID = "375"
         private const val API_URL = "https://develop-api.zillout.com/api/v1/rbzo/exotel/read-from-app"
 
         private var lastState = TelephonyManager.CALL_STATE_IDLE
         private var incomingNumber: String? = null
         private var callWasPicked = false
         private var callStartTime: Long = 0L
+
+        // NEW: For call waiting
+        private var isOnCall = false
+        private var waitingCallNumber: String? = null
+        private var waitingCallStartTime: Long = 0L
 
         private fun generateCallSid(): String {
             return UUID.randomUUID().toString().replace("-", "").substring(0, 32)
@@ -65,23 +70,77 @@ class CallReceiver : BroadcastReceiver() {
         when (state) {
 
             TelephonyManager.CALL_STATE_RINGING -> {
-                incomingNumber = number
-                callWasPicked = false
 
-                Log.d("CallReceiver", "RINGING FROM: $incomingNumber")
+                // NEW: Check if already on a call (call waiting scenario)
+                if (isOnCall && callWasPicked) {
+                    // This is a call waiting
+                    waitingCallNumber = number
+                    waitingCallStartTime = System.currentTimeMillis()
+                    Log.d("CallReceiver", "CALL WAITING FROM: $waitingCallNumber (while on call with $incomingNumber)")
+                } else {
+                    // Normal incoming call
+                    incomingNumber = number
+                    callWasPicked = false
+                    Log.d("CallReceiver", "RINGING FROM: $incomingNumber")
+                }
             }
 
             TelephonyManager.CALL_STATE_OFFHOOK -> {
 
                 if (lastState == TelephonyManager.CALL_STATE_RINGING) {
-                    callWasPicked = true
-                    callStartTime = System.currentTimeMillis()
 
-                    Log.d("CallReceiver", "CALL PICKED: $incomingNumber")
+                    // NEW: Check if this is picking up a waiting call
+                    if (waitingCallNumber != null) {
+                        // Picked up the waiting call
+                        Log.d("CallReceiver", "WAITING CALL PICKED: $waitingCallNumber")
+
+                        // First call is put on hold or ended - send its data
+                        if (incomingNumber != null) {
+                            val firstCallDuration = ((waitingCallStartTime - callStartTime) / 1000).toInt()
+                            Log.d("CallReceiver", "FIRST CALL PUT ON HOLD/ENDED: $incomingNumber | Duration: $firstCallDuration sec")
+
+                            sendCallDataToAPI(
+                                phoneNumber = incomingNumber!!,
+                                callType = "completed",
+                                dialCallStatus = "completed",
+                                durationSeconds = firstCallDuration
+                            )
+                        }
+
+                        // Now track the waiting call as the current call
+                        incomingNumber = waitingCallNumber
+                        callStartTime = waitingCallStartTime
+                        callWasPicked = true
+                        isOnCall = true
+                        waitingCallNumber = null
+                        waitingCallStartTime = 0L
+
+                    } else {
+                        // Normal call pickup
+                        callWasPicked = true
+                        callStartTime = System.currentTimeMillis()
+                        isOnCall = true
+                        Log.d("CallReceiver", "CALL PICKED: $incomingNumber")
+                    }
                 }
             }
 
             TelephonyManager.CALL_STATE_IDLE -> {
+
+                // NEW: Handle missed waiting call
+                if (waitingCallNumber != null) {
+                    Log.d("CallReceiver", "WAITING CALL MISSED: $waitingCallNumber")
+
+                    sendCallDataToAPI(
+                        phoneNumber = waitingCallNumber!!,
+                        callType = "incomplete",
+                        dialCallStatus = "no-answer",
+                        durationSeconds = 0
+                    )
+
+                    waitingCallNumber = null
+                    waitingCallStartTime = 0L
+                }
 
                 // MISSED CALL
                 if (lastState == TelephonyManager.CALL_STATE_RINGING && !callWasPicked) {
@@ -120,9 +179,13 @@ class CallReceiver : BroadcastReceiver() {
                     }
                 }
 
+                // NEW: Reset call waiting flags
                 incomingNumber = null
                 callWasPicked = false
                 callStartTime = 0L
+                isOnCall = false
+                waitingCallNumber = null
+                waitingCallStartTime = 0L
             }
         }
 
@@ -169,7 +232,7 @@ class CallReceiver : BroadcastReceiver() {
         dialCallStatus: String,
         durationSeconds: Int,
 
-    ) {
+        ) {
 
         CoroutineScope(Dispatchers.IO).launch {
 
