@@ -17,7 +17,7 @@ import java.util.*
 class CallReceiver : BroadcastReceiver() {
 
     companion object {
-        private const val PUB_ID = "352"
+        private const val PUB_ID = "653"
         private const val API_URL = "https://api.zillout.com/api/v1/rbzo/exotel/read-from-app"
 
         private var lastState = TelephonyManager.CALL_STATE_IDLE
@@ -132,6 +132,14 @@ class CallReceiver : BroadcastReceiver() {
                         )
                     }
                     waitingCalls.clear()
+
+                    // CRITICAL FIX: If main call is still active, don't process it yet
+                    // Just update lastState and return
+                    if (callWasPicked && isOnCall) {
+                        Log.d("CallReceiver", "Main call still active, waiting calls cleared")
+                        lastState = state
+                        return
+                    }
                 }
 
                 // Handle missed first/main incoming call
