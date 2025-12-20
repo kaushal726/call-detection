@@ -3,13 +3,10 @@ package com.example.myapplication
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.database.Cursor
-import android.provider.CallLog
 import android.telephony.TelephonyManager
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -20,8 +17,8 @@ import java.util.*
 class CallReceiver : BroadcastReceiver() {
 
     companion object {
-        private const val PUB_ID = "818"
-        private const val API_URL = "https://webhook.site/6d3546a0-f38d-4c64-9dab-94fbb778694b"
+        private const val PUB_ID = "352"
+        private const val API_URL = "https://api.zillout.com/api/v1/rbzo/exotel/read-from-app"
 
         private var lastState = TelephonyManager.CALL_STATE_IDLE
 
@@ -32,11 +29,6 @@ class CallReceiver : BroadcastReceiver() {
 
         // Track multiple waiting calls
         private val waitingCalls = mutableListOf<Pair<String, Long>>()
-
-        // NEW: For multiple ringing detection
-        private var multipleRingingStartTime: Long = 0L
-        private var ringingCount = 0
-        private val sentNumbers = mutableSetOf<String>() // Prevent duplicates in same session
 
         private fun generateCallSid(): String =
             UUID.randomUUID().toString().replace("-", "").substring(0, 32)
@@ -56,11 +48,11 @@ class CallReceiver : BroadcastReceiver() {
         }
 
         if (number != null) {
-            onCallStateChanged(context, state, number)
+            onCallStateChanged(state, number)
         }
     }
 
-    private fun onCallStateChanged(context: Context?, state: Int, number: String) {
+    private fun onCallStateChanged(state: Int, number: String) {
 
         if (state == lastState) return
 
@@ -75,23 +67,10 @@ class CallReceiver : BroadcastReceiver() {
                     waitingCalls.add(number to ringTime)
                     Log.d("CallReceiver", "WAITING CALL #${waitingCalls.size}: $number")
                 } else {
-                    // First incoming call OR multiple ringing
-
-                    // NEW: Track multiple ringing
-                    if (incomingNumber == null) {
-                        // First ring
-                        multipleRingingStartTime = System.currentTimeMillis()
-                        ringingCount = 1
-                        sentNumbers.clear()
-                        Log.d("CallReceiver", "FIRST RING: $number at $multipleRingingStartTime")
-                    } else {
-                        // Multiple calls ringing
-                        ringingCount++
-                        Log.d("CallReceiver", "MULTIPLE RING #$ringingCount: $number (first was: $incomingNumber)")
-                    }
-
+                    // First incoming call
                     incomingNumber = number
                     callWasPicked = false
+                    Log.d("CallReceiver", "RINGING: $number")
                 }
             }
 
@@ -131,11 +110,6 @@ class CallReceiver : BroadcastReceiver() {
                         callWasPicked = true
                         callStartTime = System.currentTimeMillis()
                         isOnCall = true
-
-                        // NEW: Reset multiple ringing tracking since call was picked
-                        multipleRingingStartTime = 0L
-                        ringingCount = 0
-
                         Log.d("CallReceiver", "CALL PICKED: $incomingNumber")
                     }
                 }
@@ -144,7 +118,7 @@ class CallReceiver : BroadcastReceiver() {
             /* ---------------- IDLE ---------------- */
             TelephonyManager.CALL_STATE_IDLE -> {
 
-                // Handle all waiting calls that were NOT picked
+                // Handle all waiting calls that were NOT picked (rejected/missed)
                 if (waitingCalls.isNotEmpty()) {
                     Log.d("CallReceiver", "CLEARING ${waitingCalls.size} WAITING CALL(S)")
 
@@ -160,24 +134,8 @@ class CallReceiver : BroadcastReceiver() {
                     waitingCalls.clear()
                 }
 
-                // NEW: Check if multiple calls were ringing and none picked
-                if (lastState == TelephonyManager.CALL_STATE_RINGING && !callWasPicked && ringingCount > 1) {
-                    Log.d("CallReceiver", "MULTIPLE RINGING DETECTED ($ringingCount) - Checking call log")
-
-                    val sessionStart = multipleRingingStartTime
-
-                    CoroutineScope(Dispatchers.IO).launch {
-                        delay(2000) // Wait for call log
-                        context?.let { checkMissedRingingCalls(it, sessionStart) }
-
-                        // Reset
-                        multipleRingingStartTime = 0L
-                        ringingCount = 0
-                        sentNumbers.clear()
-                    }
-
-                } else if (lastState == TelephonyManager.CALL_STATE_RINGING && !callWasPicked) {
-                    // Single missed call - handle normally
+                // Handle missed first/main incoming call
+                if (lastState == TelephonyManager.CALL_STATE_RINGING && !callWasPicked) {
                     Log.d("CallReceiver", "MISSED CALL: $incomingNumber")
 
                     incomingNumber?.let {
@@ -188,10 +146,6 @@ class CallReceiver : BroadcastReceiver() {
                             durationSeconds = 0
                         )
                     }
-
-                    // Reset
-                    multipleRingingStartTime = 0L
-                    ringingCount = 0
                 }
 
                 // Handle completed/ended call
@@ -220,81 +174,6 @@ class CallReceiver : BroadcastReceiver() {
         }
 
         lastState = state
-    }
-
-    private fun checkMissedRingingCalls(context: Context, sessionStart: Long) {
-
-        if (sessionStart == 0L) return
-
-        val checkFrom = sessionStart - 2000L
-        val checkUntil = System.currentTimeMillis()
-
-        // EXTRA SAFETY: Don't check if session was too long ago
-        val sessionAge = System.currentTimeMillis() - sessionStart
-        if (sessionAge > 30000L) { // 30 seconds max
-            Log.d("CallReceiver", "Session too old ($sessionAge ms), skipping")
-            return
-        }
-
-        Log.d("CallReceiver", "Checking call log from $checkFrom to $checkUntil (window: ${checkUntil - checkFrom}ms)")
-
-        try {
-            val projection = arrayOf(
-                CallLog.Calls.NUMBER,
-                CallLog.Calls.DATE,
-                CallLog.Calls.DURATION,
-                CallLog.Calls.TYPE
-            )
-
-            val selection = """
-            ${CallLog.Calls.DATE} >= ? AND 
-            ${CallLog.Calls.DATE} <= ? AND 
-            ${CallLog.Calls.TYPE} = ? AND
-            ${CallLog.Calls.DURATION} = 0
-        """.trimIndent()
-
-            val selectionArgs = arrayOf(
-                checkFrom.toString(),
-                checkUntil.toString(),
-                CallLog.Calls.INCOMING_TYPE.toString()
-            )
-
-            val cursor: Cursor? = context.contentResolver.query(
-                CallLog.Calls.CONTENT_URI,
-                projection,
-                selection,
-                selectionArgs,
-                "${CallLog.Calls.DATE} DESC LIMIT 10"  // EXTRA SAFETY: Max 10 results
-            )
-
-            var processedCount = 0
-
-            cursor?.use {
-                while (it.moveToNext()) {
-                    val number = it.getString(it.getColumnIndexOrThrow(CallLog.Calls.NUMBER))
-                    val date = it.getLong(it.getColumnIndexOrThrow(CallLog.Calls.DATE))
-
-                    if (number != null && sentNumbers.add(number)) {
-                        Log.d("CallReceiver", "MISSED #${processedCount + 1}: $number at $date")
-
-                        sendCallDataToAPI(
-                            phoneNumber = number,
-                            callType = "incomplete",
-                            dialCallStatus = "no-answer",
-                            durationSeconds = 0
-                        )
-
-                        processedCount++
-                    }
-                }
-            }
-
-            Log.d("CallReceiver", "✅ Sent $processedCount missed calls (window: ${checkUntil - checkFrom}ms)")
-
-        } catch (e: Exception) {
-            Log.e("CallReceiver", "❌ Call log error: ${e.message}")
-            e.printStackTrace()
-        }
     }
 
     private fun sendCallDataToAPI(
