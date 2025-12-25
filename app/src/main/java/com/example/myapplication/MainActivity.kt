@@ -2,10 +2,14 @@ package com.example.myapplication
 
 import android.Manifest
 import android.app.role.RoleManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -177,6 +181,19 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val roleManager = getSystemService(RoleManager::class.java)
             val intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING)
+            startActivity(intent)
+        }
+    }
+
+    // Add this helper function in MainActivity
+    fun requestBatteryOptimizationExemption() {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val packageName = packageName
+
+        if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+            }
             startActivity(intent)
         }
     }
