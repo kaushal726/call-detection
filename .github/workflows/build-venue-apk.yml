@@ -3,18 +3,29 @@ name: Build Venue APK
 on:
   workflow_dispatch:
     inputs:
-      venue_id:
-        description: "Venue ID"
+      pub_id:
+        description: "Publisher / Venue ID to bake into the app"
         required: true
-        default: "1"
+        default: "762"
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      PUB_ID: ${{ github.event.inputs.pub_id }}
+      S3_BUCKET: ${{ secrets.APK_S3_BUCKET }}
+      S3_PREFIX: venue-apks
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Validate pub_id
+        run: |
+          if ! [[ "$PUB_ID" =~ ^[A-Za-z0-9_-]+$ ]]; then
+            echo "::error::pub_id must be alphanumeric/dash/underscore (got: '$PUB_ID')"
+            exit 1
+          fi
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -25,16 +36,30 @@ jobs:
       - name: Grant Gradle permission
         run: chmod +x ./gradlew
 
-      - name: Build APK with Venue ID
-        run: ./gradlew assembleRelease -PVENUE_ID=${{ github.event.inputs.venue_id }}
+      - name: Build APK
+        run: ./gradlew assembleRelease -PPUB_ID="$PUB_ID"
 
-      - name: Rename APK
+      - name: Package APK
         run: |
-          cd app/build/outputs/apk/release
-          mv *.apk zillout-venue-${{ github.event.inputs.venue_id }}.apk
+          mkdir -p dist
+          cp app/build/outputs/apk/release/*.apk "dist/zillout-venue-$PUB_ID.apk"
 
-      - name: Upload APK
+      - name: Upload APK as workflow artifact (backup)
         uses: actions/upload-artifact@v4
         with:
-          name: zillout-venue-${{ github.event.inputs.venue_id }}
-          path: app/build/outputs/apk/release/zillout-venue-${{ github.event.inputs.venue_id }}.apk
+          name: zillout-venue-${{ env.PUB_ID }}
+          path: dist/zillout-venue-${{ env.PUB_ID }}.apk
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload APK to S3
+        run: |
+          aws s3 cp "dist/zillout-venue-$PUB_ID.apk" \
+            "s3://$S3_BUCKET/$S3_PREFIX/zillout-venue-$PUB_ID.apk" \
+            --content-type application/vnd.android.package-archive
+          echo "Uploaded to s3://$S3_BUCKET/$S3_PREFIX/zillout-venue-$PUB_ID.apk" >> "$GITHUB_STEP_SUMMARY"
