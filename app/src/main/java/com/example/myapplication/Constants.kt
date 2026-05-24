@@ -1,4 +1,4 @@
 package com.example.myapplication
 
-const val PUB_ID = "283"
+val PUB_ID = BuildConfig.PUB_ID
 const val API_URL = "https://api.zillout.com/api/v1/rbzo/exotel/read-from-app"
