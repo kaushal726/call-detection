@@ -3,26 +3,25 @@ package com.example.myapplication
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.util.Log
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
-import java.util.concurrent.TimeUnit
+import androidx.core.content.ContextCompat
 
 class BootReceiver : BroadcastReceiver() {
 
-    override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent?.action == Intent.ACTION_BOOT_COMPLETED) {
-            Log.d("BootReceiver", "Device booted, scheduling service start")
+    override fun onReceive(context: Context, intent: Intent) {
+        // QUICKBOOT_POWERON: what some Xiaomi/HTC phones send instead of BOOT_COMPLETED.
+        if (intent.action != Intent.ACTION_BOOT_COMPLETED &&
+            intent.action != "android.intent.action.QUICKBOOT_POWERON"
+        ) return
+        Log.d("BootReceiver", "Device booted, starting CallMonitorService")
 
-            context?.let {
-                // Use WorkManager to start service after boot
-                val workRequest = OneTimeWorkRequestBuilder<ServiceStartWorker>()
-                    .setInitialDelay(10, TimeUnit.SECONDS)  // Wait 10 seconds after boot
-                    .build()
-
-                WorkManager.getInstance(it).enqueue(workRequest)
-            }
+        // Started right here: Android 12+ lets a boot receiver start a foreground service, but
+        // refuses the same start from a WorkManager job a few seconds later.
+        try {
+            ContextCompat.startForegroundService(context, Intent(context, CallMonitorService::class.java))
+        } catch (e: Exception) {
+            Log.e("BootReceiver", "Could not start CallMonitorService: ${e.message}")
         }
+        CallSyncWorker.enqueue(context)
     }
 }
