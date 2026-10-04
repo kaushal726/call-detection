@@ -15,11 +15,20 @@ import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat.getSystemService
 import androidx.core.content.ContextCompat.startActivity
 
 class CallMonitorService : Service() {
+
+    companion object {
+        /** Whether the service is up in this process. Compose state, so the main screen updates by itself. */
+        var isRunning by mutableStateOf(false)
+            private set
+    }
 
     private val CHANNEL_ID = "CallMonitorChannel"
     private val NOTIFICATION_ID = 1
@@ -28,6 +37,7 @@ class CallMonitorService : Service() {
         super.onCreate()
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, createNotification())
+        isRunning = true
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -77,14 +87,20 @@ class CallMonitorService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        isRunning = false
         Log.d("CallMonitorService", "Service destroyed, attempting restart")
 
-        // Restart service
-        val restartIntent = Intent(applicationContext, CallMonitorService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            applicationContext.startForegroundService(restartIntent)
-        } else {
-            applicationContext.startService(restartIntent)
+        // Restart service. Android 12+ refuses this from the background and throws, which used to
+        // crash the app; now the attempt just fails quietly.
+        try {
+            val restartIntent = Intent(applicationContext, CallMonitorService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                applicationContext.startForegroundService(restartIntent)
+            } else {
+                applicationContext.startService(restartIntent)
+            }
+        } catch (e: Exception) {
+            Log.e("CallMonitorService", "Restart refused: ${e.message}")
         }
     }
 
@@ -93,19 +109,23 @@ class CallMonitorService : Service() {
         Log.d("CallMonitorService", "Task removed, restarting service")
 
         // Restart immediately when app is removed from recent apps
-        val restartIntent = Intent(applicationContext, CallMonitorService::class.java)
-        val pendingIntent = PendingIntent.getService(
-            applicationContext,
-            1,
-            restartIntent,
-            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
-        )
+        try {
+            val restartIntent = Intent(applicationContext, CallMonitorService::class.java)
+            val pendingIntent = PendingIntent.getService(
+                applicationContext,
+                1,
+                restartIntent,
+                PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+            )
 
-        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        alarmManager.set(
-            AlarmManager.ELAPSED_REALTIME_WAKEUP,
-            SystemClock.elapsedRealtime() + 1000,
-            pendingIntent
-        )
+            val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            alarmManager.set(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                SystemClock.elapsedRealtime() + 1000,
+                pendingIntent
+            )
+        } catch (e: Exception) {
+            Log.e("CallMonitorService", "Restart alarm refused: ${e.message}")
+        }
     }
 }
