@@ -29,7 +29,7 @@ android {
 
 
     defaultConfig {
-        applicationId = "com.zillout.calllog"
+        applicationId = "com.example.myapplication"
         minSdk = 24
         targetSdk = 36
         versionCode = 2
