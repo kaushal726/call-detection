@@ -186,6 +186,7 @@ class CallSyncWorker(
             try {
                 connection.requestMethod = "POST"
                 connection.setRequestProperty("Content-Type", "application/json")
+                connection.setRequestProperty("Authorization", "Bearer $APP_TOKEN")
                 connection.connectTimeout = 15000
                 connection.readTimeout = 15000
                 connection.doOutput = true
