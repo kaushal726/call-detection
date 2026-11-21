@@ -1,8 +1,24 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
+
+/** local.properties (never committed): the release key's path and passwords on this machine. */
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+
+/** A release-key setting from -P, then local.properties, then the environment (CI secrets). */
+fun releaseSetting(name: String): String? =
+    (project.findProperty(name) as String?)
+        ?: localProperties.getProperty(name)
+        ?: System.getenv(name)
+
+val releaseStoreFile = releaseSetting("RELEASE_STORE_FILE")
 
 android {
     namespace = "com.example.myapplication"
@@ -13,13 +29,24 @@ android {
 
 
     defaultConfig {
-        applicationId = "com.example.myapplication"
+        applicationId = "com.zillout.calllog"
         minSdk = 24
         targetSdk = 36
         versionCode = 2
         versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        if (releaseStoreFile != null) {
+            create("release") {
+                storeFile = file(releaseStoreFile)
+                storePassword = releaseSetting("RELEASE_STORE_PASSWORD")
+                keyAlias = releaseSetting("RELEASE_KEY_ALIAS")
+                keyPassword = releaseSetting("RELEASE_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -29,7 +56,14 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            // Signed with the release key when RELEASE_STORE_FILE is set; without it the APK is
+            // debug-signed, which Play Protect flags as harmful, so a warning is printed.
+            signingConfig = if (releaseStoreFile != null) {
+                signingConfigs.getByName("release")
+            } else {
+                logger.warn("RELEASE_STORE_FILE not set: the release APK is debug-signed.")
+                signingConfigs.getByName("debug")
+            }
         }
     }
     compileOptions {
